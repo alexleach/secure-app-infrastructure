@@ -1,38 +1,45 @@
-# Private Cloud Infrastructure
+# Secure App Infrastructure
 
-This repository hosts a set of docker compose files demonstrating how to a
-configure a complete private cloud infrastructure, providing identity
-management, MFA-capable authentication, automatic SSL certificate generation
-and a Web App Firewall.
-
-All of these services can be hosted on-premise, completely eliminating the need
-for using public cloud hosted alternatives. Although using public cloud
-services might be a lot easier to configure, this allows you to host everything
-on-premise, in your private cloud, or just on your home PC or laptop. In fact,
-you could probably run all of this on a Raspberry Pi(!), but the concepts from
-this solution could be scaled to run across a datacentre.
+This repository demonstrates how to run a complete private cloud web
+infrastructure, providing identity management (IdP), MFA-capable authentication,
+automatic SSL certificate generation and a Web App Firewall. All from your own
+private infrastructure! Or, if you prefer, run it all in the cloud!
 
 ## Overview
 
 ![Architectural Overview](docs/images/architecture.svg)
 
-The high-level components are illustrated in the above figure. Each service
-needs to be configured as per your own requirements. Further, split DNS should
-be configured on your internal router for your domain, so that services don't
-attempt to communicate with eachother through your router's WAN IP (which would
-also require hairpin NAT to be configured on your router).
+The high-level components are illustrated in the above figure. `traefik` routes
+all incoming requests based on their HTTP `Host` or TCP `HostSNI` headers. The
+configured `Host` names are used by traefik to request appropriately named SSL
+certificates from an ACME compliant issuing CA. Any requests not matching a
+configured `Host` name will just be presented with a `404` Response. HTTP
+requests are then filtered by the `modsecurity` Core Rule Set. If all is okay
+up until this point, the client will be redirected to a login screen on a
+`vault` server. Once successfully logged in, the client is issued with a token
+valid for the parent domain. This single authentication token can be used for
+SSO to any service running on the cluster and routed by traefik.
 
 ## Configuration
 
+Each service needs to be configured as per your own requirements. Further, split
+DNS should be configured on your internal router for your domain, so that services
+don't attempt to communicate with eachother through your router's WAN IP (which
+would also require hairpin NAT to be configured on your router).
+
 I would suggest setting up the services in the following order:-
 
-1. Step Certificate Authority. See [certificates.md](docs/certificates.md)
-2. `traefik` router. Read through the comments and configure 
-   [`docker-compose-router.yaml`](docker-compose-router.yaml) and
+1. [Step CA](https://smallstep.com/docs/step-ca). See the documentation at
+   [certificates.md](docs/certificates.md)
+2. [`traefik` router](https://traefik.io/). Read through the comments and
+   configure [`docker-compose-router.yaml`](docker-compose-router.yaml) and
    [`traefik.yaml`](traefik/traefik.yml) as per your requirements.
-3. `Vault` Identity and OIDC Authentication provider. See
-   [authentication.md](docs/authentication.md)
-4. Add separate web services as necessary. An example `whoami` service is
+3. [`Vault`](https://www.vaultproject.io/) Identity and OIDC Authentication
+   provider. See the docs, at [authentication.md](docs/authentication.md)
+4. [`traefik-forward-auth`](https://github.com/thomseddon/traefik-forward-auth).
+   This is configured with Vault, as described
+   [here](https://github.com/thomseddon/traefik-forward-auth)
+5. Add separate web services as necessary. An example `whoami` service is
    available in [`docker-compose-whoami.yaml`](docker-compose-whoami.yaml)
 
 ## Requirements
@@ -41,6 +48,7 @@ I would suggest setting up the services in the following order:-
  - [`docker-compose`](https://docs.docker.com/compose/)
  - Your own domain name. You can use any domain name, so long as you can edit
    the DNS settings on your router, local DNS server, and/or local hosts file.
+ - For external access, permission to configure a public DNS zone
  - A good text editor!
  - A bit of time to set up and configure everything.
 
