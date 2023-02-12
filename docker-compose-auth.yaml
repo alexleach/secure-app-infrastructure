@@ -1,0 +1,145 @@
+version: "3.3"
+name: auth
+
+services:
+
+  # The vault service needs to be initialised and unsealed before it can start
+  # up successfully and start doing anything useful.
+  vault:
+    image: "vault:latest"
+
+    # On restarts, vault typically requires manual intervention though...
+    #restart: unless-stopped
+    volumes:
+      - ./vault/file:/vault/file:rw
+      - ./vault/config:/vault/config:rw
+      - ./vault/policies:/vault/policies:rw
+      - ./vault/logs:/vault/logs:rw
+
+    cap_add:
+      - IPC_LOCK
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      # For testing purposes, can set a static HOST record for
+      # vault.example.com, pointing to the traefik host's public IP.
+      - VAULT_API_ADDR=https://vault.example.com
+
+      # Uncomment to see debug messages.
+      # N.B. Audit / Access logs are configured separately, in:-
+      #   /vault/config/vault.json
+      #- VAULT_LOG_LEVEL=debug
+
+    command: vault server -config=/vault/config/vault.json
+    depends_on:
+      - vault-db
+    labels:
+      - "traefik.enable=true"
+
+      # Attach to traefik's backend network.
+      - "traefik.docker.network=traefik_net"
+
+      # Traefik Host rule, used for routing, and also TLS certificate generation.
+      - "traefik.http.routers.vault.rule=Host(`vault.example.com`)"
+      - "traefik.http.routers.vault.service=vault-oidc"
+
+      # Attach to TLS-enabled entrypoint, telling traefik to get a certificate
+      # from the Step CA certificate resolver
+      - "traefik.http.routers.vault.entrypoints=websecure"
+      - "traefik.http.routers.vault.tls=true"
+      - "traefik.http.routers.vault.tls.certresolver=step-ca-resolver"
+      - "traefik.http.routers.vault.tls.domains[0].main=vault.example.com"
+
+      # Checks traffic against the OWASP ModSecurity Core Rule Set.
+      # The client_id and client_password need to be configured first
+      - "traefik.http.routers.vault.middlewares=waf"
+
+      # The port vault is listening on in the container
+      - "traefik.http.services.vault-oidc.loadbalancer.server.port=8200"
+
+    networks:
+      - traefik_net
+      - vault_backend
+
+  # Consul is used as Vault's backend storage. Raft is the other
+  # high-availability option.
+  vault-db:
+    image: "consul:latest"
+    #restart: unless-stopped
+    ports:
+      - :8500
+    volumes:
+      - ./consul/config.json:/consul/config/consul.json
+      - consul-data:/consul/data
+    command: "agent -data-dir=/consul/data -config-dir=/consul/config -client 0.0.0.0"
+    networks:
+      - vault_backend
+
+  # The forward-auth service acts as traefik middleware, performing OpenID
+  # Connect authentication requests against the vault container (below)
+  forward-auth:
+    image: thomseddon/traefik-forward-auth:2
+    depends_on:
+      - vault
+
+    networks:
+      - traefik_net
+
+    # If using your own PKI, copy in the root CA public cert
+    #volumes:
+    #  - ./certs/root_ca.crt:/etc/ssl/certs/root_ca.crt:ro
+
+    environment:
+
+      - DEFAULT_PROVIDER=oidc
+
+      # The information entered here must match what is returned from vault-oidc:-
+      - PROVIDERS_OIDC_ISSUER_URL=https://vault.example.com/v1/identity/oidc/provider/example.com
+      - PROVIDERS_OIDC_CLIENT_ID=<get from vault>
+      - PROVIDERS_OIDC_CLIENT_SECRET=<get from vault>
+
+      # Change this to a random string! It is used to sign authentication cookies
+      - SECRET=<(openssl rand -base64 64)>
+
+      # INSECURE_COOKIE is required if not using a https entrypoint
+      #- INSECURE_COOKIE=true
+
+      # The external DNS name used to access this service, matching the traefik
+      # router rule
+      - AUTH_HOST=auth.example.com
+
+      # URL_PATH must match what is configured on the Vault OIDC Provider
+      - URL_PATH=/auth/oidc-callback
+
+      # Parent domain of all service endpoints
+      - COOKIE_DOMAIN=example.com
+
+      # Restrict users logging in to this domain
+      - DOMAIN=example.com
+
+      #- LOG_LEVEL=debug
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_net"
+
+      - "traefik.http.routers.auth.entryPoints=websecure"
+      - "traefik.http.routers.auth.rule=Host(`auth.example.com`)"
+      - "traefik.http.routers.auth.service=auth"
+      - "traefik.http.routers.auth.tls=true"
+      - "traefik.http.routers.auth.tls.certresolver=step-ca-resolver"
+      - "traefik.http.services.auth.loadbalancer.server.port=4181"
+
+      # Route this service through itself (required!).
+      - "traefik.http.routers.auth.middlewares=traefik-forward-auth"
+      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.address=http://forward-auth:4181"
+      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.authResponseHeaders=X-Forwarded-User"
+
+
+volumes:
+  consul-data:
+
+networks:
+  traefik_net:
+    external: true
+  vault_backend:
+

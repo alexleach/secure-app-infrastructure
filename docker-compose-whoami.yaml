@@ -1,0 +1,38 @@
+version: "3.3"
+name: example
+services:
+  whoami:
+    image: "whoami"
+    labels:
+      - "traefik.enable=true"
+
+      # Attach to traefik's backend network.
+      - "traefik.docker.network=traefik_net"
+
+      # Traefik Host rule, used for routing, and also TLS certificate generation.
+      - "traefik.http.routers.whoami.rule=Host(`whoami.example.com`)"
+      - "traefik.http.routers.whoami.service=whoami"
+
+      # Attach to TLS-enabled entrypoint, telling traefik to get a certificate
+      # from the Step CA certificate resolver
+      - "traefik.http.routers.vault.entrypoints=websecure"
+      - "traefik.http.routers.vault.tls=true"
+      - "traefik.http.routers.vault.tls.certresolver=step-ca-resolver"
+      - "traefik.http.routers.vault.tls.domains[0].main=whoami.example.com"
+
+      # The port the service is listening to
+      - "traefik.http.services.whoami.loadbalancer.server.port=80"
+
+      # Checks traffic against the OWASP ModSecurity Core Rule Set.
+      - "traefik.http.routers.whoami.middlewares=waf"
+
+      # Make sure clients are authenticated
+      - "traefik.http.routers.whoami.middlewares=traefik-forward-auth"
+
+
+    networks:
+      - traefik_net
+
+networks:
+  traefik_net:
+    external: true

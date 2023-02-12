@@ -1,0 +1,22 @@
+{
+  "storage": {
+    "consul": {
+      "address": "vault-db:8500",
+      "path": "vault/"
+    }
+  },
+  "listener": {
+    "tcp": {
+      "address": "0.0.0.0:8200",
+      "tls_disable": true
+    }
+  },
+  "default_lease_ttl": "168h",
+  "max_lease_ttl": "0h",
+  "audit": {
+    "file" : {
+      "file_path": "stdout"
+    }
+  },
+  "ui": "true"
+}

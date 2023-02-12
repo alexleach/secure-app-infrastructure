@@ -1,0 +1,117 @@
+version: "3.3"
+name: router
+
+services:
+
+  traefik:
+    image: "traefik:latest"
+
+    # Need to build a custom image to run update-ca-certificates ?
+    # Unnecessary if using public CA provider, e.g. letsencrypt
+    #build:
+    #  context: traefik/
+    #image: my-traefik:latest
+
+    restart: unless-stopped
+
+    ports:
+      - "0.0.0.0:80:80/tcp"
+      - "0.0.0.0:443:443/tcp"
+
+    volumes:
+      # Static configuration file
+      - "./traefik/traefik.yml:/etc/traefik/traefik.yml:ro"
+      # Dynamic configuration folder, to be watched by traefik
+      - "./traefik/dynamic-config:/var/run/traefik"
+
+      # Map the step CA root certificates from the step-ca service
+      # Unfortunately, this isn't enough for the system to trust the
+      # certificates. `update-ca-certificates` must be run as well.
+      #- ./certs/root_ca.crt:/usr/local/share/ca-certificates/root_ca.crt:ro"
+      #- ./certs/intermediate_ca.crt:/usr/local/share/ca-certificates/intermediate_ca.crt:ro"
+
+      # Gives traefik read-only access to the docker API socket
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+      # ACME issued certificates folder
+      - "./traefik/acme:/etc/acme/"
+
+      # Default certificate and key used by traefik (optional), for unmatched
+      # services
+      #- "./certs/default-cert.key:/etc/ssl/default-cert.key:ro"
+      #- "./certs/default-cert.pem:/etc/ssl/default-cert.pem:ro"
+
+    networks:
+      # The `default` network will be exposed to external hosts
+      - default
+      # Service containers are routed through traefik to a private network
+      - traefik_net
+
+    labels:
+      - "traefik.enable=true"
+
+      # Dashboard configuration (optional)
+      - "traefik.http.routers.dashboard.entryPoints=websecure"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard.example.com`) && PathPrefix(`/api`, `/dashboard`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls=true"
+
+      # Configure Basic Authentication to the dashboard and API
+      # User name: foo, Password: changeme
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=foo:$$apr1$$T.P1E9pC$$WTN3nfBdi/bwGHQgmxe5Z0"
+
+      # Protect the dashboard with the OWASP Core Rule Set (once configured)
+       - "traefik.http.routers.dashboard.middlewares=waf"
+
+      # owasp-modsecurity plugin configuration
+      - "traefik.http.middlewares.waf.plugin.modsecurity.modSecurityUrl=http://modsecurity-waf:80"
+      - "traefik.http.middlewares.waf.plugin.modsecurity.maxBodySize=10485760"
+
+    # Could use secrets to authenticate to DNS API on cloudflare, for
+    # letsencrypt DNS challenge
+    #secrets:
+    #  - traefik-cloudflare-api-dns-token
+
+    environment:
+      # If using DNS API on cloudflare, put your key in a secret and tell the
+      # cloudflare library about it, like this:-
+      #- CF_DNS_API_TOKEN_FILE=/run/secrets/traefik-cloudflare-api-dns-token
+
+      # When using an on-prem ACME CA server, enter it's address and path to
+      # its public certificate here.
+      - LEGO_CA_SERVER_NAME=ca.example.com
+      - LEGO_CA_CERTIFICATES=/usr/local/share/ca-certificates/root_ca.crt
+
+
+  # We can run one the modsecurity Core Rule Set service without any further
+  # configuration. This is used by traefik as middleware and isn't accessed
+  # externally...
+
+  # N.B. These security settings are by no means optimised, DYOR!
+  # See https://owasp.org/www-project-modsecurity-core-rule-set/
+  modsecurity-waf:
+    image: owasp/modsecurity-crs:nginx-alpine
+    environment:
+      - SERVER_NAME=modsecurity-waf
+      - PARANOIA=1
+      - ANOMALY_INBOUND=10
+      - ANOMALY_OUTBOUND=5
+      - BACKEND=http://modsecurity-backend
+    networks:
+      - traefik_net
+      - modsecurity_backend
+    restart: unless-stopped
+    depends_on:
+      - modsecurity-backend
+
+  # Annoyingly the modsecurity-crs container depends on a separate backend
+  # container running a web server just to return HTTP 200 responses.
+  modsecurity-backend:
+    image: containous/whoami
+    networks:
+      - modsecurity_backend
+    restart: unless-stopped
+
+networks:
+  traefik_net:

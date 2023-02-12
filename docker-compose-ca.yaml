@@ -1,0 +1,96 @@
+version: "3"
+
+services:
+  # An ACME server is kept alive and is accessible from traefik, issuing
+  # certificates to traefik on behalf of client services.
+  # In production, an offline Root CA should be used, with this Step CA
+  # acting as an intermediate, issuing CA.
+  step-ca:
+    image: "smallstep/step-ca"
+
+    volumes:
+
+      - step-data:/home/step
+      # By having a volue explicitly for the certificates,
+      # we can load them directy into other containers.
+      #- step-certs:/home/step/certs
+
+      # We can mount our own root and intermediate ca certificate file, if
+      # they already exist. If the intermediate key is password-protected, also
+      # set the PWDPATH to a file containing the password (see environment
+      # section below).
+      #
+      #- ./certs/root_ca.crt:/home/step/certs/root_ca.crt:ro
+      # See docs/certificates.md for details on how to generate a CSR using
+      # Step CA, for signing by the offline root CA.
+      # ./certs/intermediate_ca.crt:/home/step/certs/intermediate_ca.crt:ro
+
+      #  Ideally, let Step CA manage its private key itself. So don't have the
+      #  key outside of step-ca. Just copy a CSR out and a signed cert back in.
+      # ./certs/intermediate_ca.key:/home/step/secrets/intermediate_ca_key:ro
+
+    ports:
+      - :9000
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: curl -k https://localhost:9000/health
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_net"
+
+      # Step-CA is recommended to be routed at Layer 4 of the OSI, so needs to
+      # be configured with a traefik TCP router, not an HTTP router.
+      # To use an HTTP router, which would unencrypt traffic and re-encrypt it
+      # before routing to step-ca, step-ca needs to be configured to listen on
+      # port 443 on the backend. The default bind port is 9000 however, which
+      # I have found requires a TCP router.
+      - "traefik.tcp.routers.step-ca.entrypoints=websecure"
+      - "traefik.tcp.routers.step-ca.rule=HostSNI(`ca.example.com`)"
+      - "traefik.tcp.routers.step-ca.service=step-ca"
+
+      - "traefik.tcp.routers.step-ca.tls.passthrough=true"
+
+      # Enable modsecurity filtering, only once configured though
+      #- "traefik.http.routers.step-ca.middlewares=waf"
+
+      - "traefik.tcp.services.step-ca.loadbalancer.server.port=9000"
+
+      # If you configure the backend to listen on port 443, so traefik can use
+      # an http router, you need to configure the traefik router and
+      # serversTransport a bit more:-
+      #- "traefik.http.services.step-ca.loadbalancer.server.scheme=https"
+      # The ca@file provider is 'dynamically' configured in a watched folder,
+      # as some of its options aren't available to the docker provider.
+      #- "traefik.http.services.step-ca.loadbalancer.serverstransport=ca@file"
+
+    environment:
+      # Give Step-CA the path to a secret file containing the certificate
+      # password, if it has one. This defaults to /home/step/secrets/password
+      #- "PWDPATH=/run/secrets/step_cert_password"
+      #
+      # These configure initialization values for the Step CA server
+      - "DOCKER_STEPCA_INIT_NAME=Example.com CA Server"
+      - "DOCKER_STEPCA_INIT_DNS_NAMES=ca.example.com"
+      - "DOCKER_STEPCA_INIT_ACME=true"
+      - "DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=false"
+      - "DOCKER_STEPCA_INIT_PROVISIONER_NAME=example.com"
+
+    #secrets:
+    #  # See above
+    #  - step_cert_password
+
+networks:
+  default:
+    name: traefik_net
+    external: true
+
+volumes:
+  step-data:
+
+# If a certificate password is needed, 
+#secrets:
+#  step_cert_password:
+#    file: secrets/step-cert-password

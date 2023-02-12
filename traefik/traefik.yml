@@ -1,0 +1,70 @@
+# Docker configuration backend
+providers:
+  docker:
+    endpoint: "unix://var/run/docker.sock"
+    # Must manually add "traefik.enable=true" label to each container.
+    exposedByDefault: false
+    watch: true
+
+  file:
+    # Folder with dynamic configuration files
+    directory: /var/run/traefik
+    watch: true
+
+# Listen on ports 80 and 443, redirecting all http connections to https
+entryPoints:
+  web:
+    address: :80
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: :443
+
+
+# API and dashboard configuration
+api:
+  dashboard: true
+#  debug: true
+
+certificatesResolvers:
+# This example shows requesting certificates from a public CA server
+# using the acme letsencrypt resolver
+
+  # Try and get certificate off my step-ca container...
+  step-ca-resolver:
+    acme:
+      email: "me@example.com"
+      storage: "/etc/acme/step-ca.json"
+
+      # Can use the service alias as hostname, as docker serves DNS requests
+      caServer: "https://ca.example.com/acme/acme/directory"
+      # I like EC384, personally...
+      #keyType: EC384
+      tlsChallenge: {}
+      certificatesDuration: 24
+
+# Configure the modsecurity CRS traefik plugin
+experimental:
+  plugins:
+    modsecurity:
+      modulename: github.com/acouvreur/traefik-modsecurity-plugin
+      version: v1.2.1
+
+# Debug traefik
+#log:
+#  level: DEBUG
+
+# Add some more info to the audit log
+accessLog:
+  fields:
+    names:
+      ServiceName: keep
+      ServiceUrl: keep
+      RequestHost: keep
+      TLSVersion: keep
+
+#vim: sw=2 ts=2 sts=2 expandtab

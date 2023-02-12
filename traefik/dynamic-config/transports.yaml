@@ -1,0 +1,22 @@
+# Force traefik to connect using a hostname / SNI, as opposed to
+# connecting to the issuing-ca by IP address (which then fails
+# certificate verification
+http:
+  serversTransports:
+    ca:
+      serverName: ca.example.com
+
+      # Once proper CA certificates have been created and loaded into Step CA,
+      # configure them here, so traefik trusts all backend service certificates
+      rootCAs:
+        - /usr/local/share/ca-certificates/root_ca.crt
+        - /usr/local/share/ca-certificates/intermediate_ca.crt
+
+      # `peerCertURI` doesn't work, as that attempts to validate the server
+      # certificate as having a URI in its SANs, which is not usual. Instead,
+      # SANs with DNS URIs are more common.
+      #
+      #peerCertURI: ca.example.com
+
+      # For testing purposes (or single host).
+      insecureSkipVerify: true

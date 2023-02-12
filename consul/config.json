@@ -1,0 +1,13 @@
+{
+  "datacenter": "localhost",
+  "data_dir": "/consul/data",
+  "log_level": "info",
+  "server": true,
+  "ui_config": {
+   "enabled": false
+  },
+  "ports": {
+    "dns": 53
+  },
+  "bootstrap_expect": 1
+}
