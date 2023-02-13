@@ -29,9 +29,9 @@ would also require hairpin NAT to be configured on your router).
 
 I would suggest setting up the services in the following order:-
 
-1. [Step CA](https://smallstep.com/docs/step-ca). See the documentation at
+1. [`traefik` router](https://traefik.io/).See my notes [here](docs/traefik.md)
+2. [Step CA](https://smallstep.com/docs/step-ca). See the documentation at
    [certificates.md](docs/certificates.md)
-2. [`traefik` router](https://traefik.io/).See my notes [here](docs/traefik.md)
 3. [`Vault`](https://www.vaultproject.io/), used as an Identity and OIDC
    Authentication provider. (It can do a lot more!) See my setup docs, at
    [authentication.md](docs/authentication.md)

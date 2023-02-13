@@ -134,7 +134,6 @@ services:
       - "traefik.http.middlewares.traefik-forward-auth.forwardauth.address=http://forward-auth:4181"
       - "traefik.http.middlewares.traefik-forward-auth.forwardauth.authResponseHeaders=X-Forwarded-User"
 
-
 volumes:
   consul-data:
 

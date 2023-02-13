@@ -1,4 +1,5 @@
 version: "3"
+name: ca
 
 services:
   # An ACME server is kept alive and is accessible from traefik, issuing

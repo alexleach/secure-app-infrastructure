@@ -60,7 +60,7 @@ Some background reading on Vault OIDC providers:-
 
   - https://developer.hashicorp.com/vault/docs/concepts/oidc-provider
 
-### Configuration
+### Initialising Vault
 
 Vault needs quite a lot of hands-on work to set up, and then also needs manual
 intervention every time it is restarted. Further, any new web apps added as
@@ -71,51 +71,255 @@ The tutorial on the Vault website should be the main reference point for
 configuring Vault as an OIDC identity provider. Please have a read through:-
 https://developer.hashicorp.com/vault/tutorials/auth-methods/oidc-identity-provider
 
-Some notes on the tutorial:-
+However, the steps followed are noted down here:-
 
-  - Set up a vault alias so you can copy commands directly from the tutorial:-
-    `alias vault='docker-compose -f docker-compose-auth.yaml exec provider vault "$@"'`
+```
+# Set an alias for the `vault` command
+alias vault='docker-compose -f docker-compose-auth.yaml exec vault vault "$@"'
+
+# Initialise vault. Add --help flag to see all available options
+vault operator init
+```
+
+Take a note of the unseal keys and root token. There are various security
+related best-practifces about these keys and token, e.g. encrypt the unseal
+keys with gpg keys, distribute amongst numerous people, disable the root token
+account, etc.
+
+### Unsealing Vault and logging in
+
+Unseal vault and login with the root token (or a user role with the privileges 
+defined in the policy at the top of the Vault oidc-identity-provider
+documentation)
+```
+vault operator unseal
+vault login
+```
+
+### Configure an Identity Provider.
+
+For the purposes of this setup, we can enable Vault's internal `userpass` IdP.
+(See [Vault's docs](https://developer.hashicorp.com/vault/docs/auth) for a full
+list of Auth Methods built into Vault.)
+
+```
+# Enable the userpass Auth method
+vault auth enable userpass
+```
+
+Let's create a user, say `j.bloggs` and set an initial password
+
+```
+vault write auth/userpass/users/j.bloggs password='foo123' token_ttl="1h"
+```
+
+### Create a vault Entity and Group
+
+This links the user entity in Vault to the backend IdP and adds some metadata.
+
+```
+vault write identity/entity name="j.bloggs" \
+    metadata="email=j.bloggs@example.com" \
+    metadata="phone_number=+1234567890" \
+    disabled=false
+```
+
+Create a group, so policies can be applied to multiple user entities.
+
+```
+vault write identity/group name="staff" member_entity_ids="${IDENTITY_ID}"
+```
+
+Get Unique IDs for the `userpass` auth method, the user Entity, and the Group.
+
+```
+USERPASS_ACCESSOR=$(vault auth list -detailed -format json | jq -r '.["userpass/"].accessor')
+ENTITY_ID=$(vault read -field=id identity/entity/name/j.bloggs)
+GROUP_ID=$(vault read -field=id identity/group/name/all_users)
+```
+
+Create an `entity-alias`, which associates the Auth Method (i.e. `userpass`
+backend) with the relevant User Name for that backend. Multiple alias's can be
+configured, but each alias needs to be associated with a different Auth Method
+(the `mount_accessor` argument below).
+
+```
+vault write identity/entity-alias name="j.bloggs" \
+    canonical_id="${ENTITY_ID}" \
+    mount_accessor="${USERPASS_ACCESSOR}"
+```
+
+### Configure the OIDC provider
+
+Create an 'assignment', which is a grouping of `entity_ids` and `group_ids`
+that can be assigned as like an Access Control Entry.
+
+```
+vault write identity/oidc/assignment/allowed_users \
+    entity_ids="${ENTITY_ID}" \
+    group_ids="${GROUP_ID}"
+```
+
+Create a key to be used by the OIDC provider for your domain
+
+```
+vault write identity/oidc/key/oidc-key \
+   allowed_client_ids="*.example.com" \
+   verification_ttl="2h" \
+   rotation_period="1h" \
+   algorithm="RS256"
+```
+
+### Add an OIDC client application
+
+Create your first OIDC client, for `traefik-forward-auth`. The `redirect_uris`
+here will need to match the `AUTH_HOST` and `URL_PATH` environment variables
+defined for the `forward-auth` service, configured in
+[`docker-compose-auth.yaml`](../docker-compose-auth.yaml)
+
+```
+vault write identity/oidc/client/traefik \
+    redirect_uris="https://auth.example.com/auth/oidc-callback" \
+    assignments="allowed_users" \
+    key="oidc-key" \
+    id_token_ttl="30m" \
+    access_token_ttl="1h"
+```
+
+Now, copy across the `CLIENT_ID` and `CLIENT_PASSWORD` values into the
+respective `PROVIDERS_OIDC_` environment variables in 
+[`docker-compose-auth.yaml`](../docker-compose-auth.yaml).
+
+Further, save the client ID to a bash variable.
+
+```
+CLIENT_ID=$(vault read -field=client_id identity/oidc/client/traefik)
+```
+
+### Configure the Vault OIDC provider
+
+We specify what attributes (claims) can be requested in scope templates.
+
+```
+USER_SCOPE_TEMPLATE='{
+    "username": {{identity.entity.name}},
+    "contact": {
+        "email": {{identity.entity.metadata.email}},
+        "phone_number": {{identity.entity.metadata.phone_number}}
+    }
+}'
+
+GROUPS_SCOPE_TEMPLATE='{
+    "groups": {{identity.entity.groups.names}}
+}'
+
+EMAIL_SCOPE_TEMPLATE='{
+    "email": {{identity.entity.metadata.email}}
+}'
+
+# Add the user scope template to vault's database
+vault write identity/oidc/scope/user \
+    description="The user scope provides claims using Vault identity entity metadata" \
+    template="$(echo ${USER_SCOPE_TEMPLATE} | base64 -)"
+
+# Add the groups scope template to vault's database
+vault write identity/oidc/scope/groups \
+    description="The groups scope provides the groups claim using Vault group membership" \
+    template="$(echo ${GROUPS_SCOPE_TEMPLATE} | base64 -)"
+
+# Add an email scope template to vault's database
+vault write identity/oidc/scope/email \
+    description="The email scope creates a top level 'email' claim" \
+    template="$(echo ${EMAIL_SCOPE_TEMPLATE} | base64 -)"
+```
+
+### Configure the Vault provider
+
+Finally, create the example.com provider, adding the `traefik` OIDC client
+to the list of allowed clients, and the scopes that are supported
+
+```
+# Configure the scopes and clients supported, by creating a 'provider'
+vault write identity/oidc/provider/example.com \
+    allowed_client_ids="${CLIENT_ID}" \
+    scopes_supported="groups,user,email"
+```
+
+Now, you should be able to check the OIDC configuration endpoint!
+```
+curl -s https://vault.example.com/v1/identity/oidc/provider/example.com/.well-known/openid-configuration | jq
+```
+
+Some notes on the Vault website's
+[tutorial](https://developer.hashicorp.com/vault/tutorials/auth-methods/oidc-identity-provider):-
+
   - No need to worry about writing a custom vault 'policy' on a new server. The
     default policy works with the OpenID Connect provider out of the box
     (tested vault v1.12.2), and the root token can be used to set everything
-    up. It is recommended to set up a user with appropriate permissions though.
+    up. It is recommended to set up a user with appropriate permissions though,
+    instead of using the root token.
   - Each user entity needs an alias configured with the same name. This first
     alias is required to point the entity to a specific `mount_accessor`.
   - Each additional alias requires a different `mount_accessor`. The
-    `mount_accessor` is effectively the identity provider. In this case, we us
+    `mount_accessor` is effectively the identity provider. In this case, we use
     the `userpass` authentication module.  So, you can't configure two aliases
-    that login with the same password. I tried configuring my email as an
-    alias, so I could login either with my username or my email, both using the
-    same backend entity and password. This didn't work :/
+    that login with the same password and backend. I tried configuring my email
+    as an alias, so I could login either with my username or my email, both using
+    the same backend entity and password. This didn't work :/
   - The key needs to be configured with the `RS256` algorithm. For whatever
     reason, `traefik-forward-auth` doesn't accept for example ES384 keys.
   - `email` needs to be added as a scope's top level key. I created a separate
     `email` scope for this (but it could probably just be moved out of the
     `contact` group in the `user` scope):-
 
+
+## traefik-forward-auth
+
+Now that Vault is configured as an authentication provider, we can start
+configuring client apps to authenticate users with it. Not all web apps support
+OIDC authentication out of the box (e.g. Jupyter Notebooks, without a Jupyter
+Hub instance), but we can configure `traefik` middleware to only allow
+authenticated users to access any particular service.  We will do this with the
+excellent
+[`traefik-forward-auth`](https://github.com/thomseddon/traefik-forward-auth)
+traefik plugin.
+
+If you've followed the steps above, you'll already have [created an OIDC
+client](#add-an-oidc-client-application) in Vault.
+
+Once you've regsistered the OIDC client app in Vault, get its `CLIENT_ID` and
+`CLIENT_SECRET` using:-
+
 ```
-EMAIL_SCOPE_TEMPLATE='{
-    "email": {{identity.entity.metadata.email}}
-}'
-
-# Add the email scope template to vault's database
-vault write identity/oidc/scope/email \
-    description="The email scope creates a top level `email` claim" \
-    template="$(echo ${EMAIL_SCOPE_TEMPLATE} | base64 -)"
-
-# Add the scope to the provider's `scopes_supported`. (allowed_client_ids only
-# needs to be included if not already configured)
-vault write identity/oidc/provider/${MY_PROVIDER} \
-    allowed_client_ids="${CLIENT_ID}" \
-    scopes_supported="groups,user,email"
+vault read identity/oidc/client/traefik-auth
 ```
 
-### Setting up MFA
+The `CLIENT_ID` and `CLIENT_SECRET` need to be added to the
+`traefik-forward-auth` service in
+[docker-compose-auth.yaml](../docker-compose-auth.yaml)
+
+Once this is configured (and the service restarted of course!), you can start
+protecting traefik services with it, by adding docker labels to each service
+you want to protect.
+
+```
+    labels:
+      [...]
+      - "traefik.http.routers.<router>.middlewares=traefik-forward-auth"
+```
+
+A fully protected example web service running the `whoami` image is
+demonstrated in [`docker-compose-whoami.yaml`](../docker-compose-whoami.yaml).
+
+### Enable TOTP MFA
+
+As a bonus, we can further protect the web services by enabling Time-based
+One-Time Password (TOTP) Multi-Factor Authentication in Vault.
 
 Used the documentation at
 https://developer.hashicorp.com/vault/tutorials/auth-methods/active-directory-mfa-login-totp
-but had to amend quite significantly, to work with the userpass auth method and
-to allow entity's to register their own MFA method.
+but had to amend quite significantly, to work with the `userpass` auth method
+and to allow user's to register their own MFA method.
 
 Update the default policy, allowing entity's to generate their own MFA QR code.
 
@@ -133,6 +337,7 @@ path "identity/mfa/method/totp" {
 ```
 
 Get the current, default policy, and append the above.
+
 ```
 # Save the file path's to variables
 DEFAULT_CONFIG="./vault/policies/default.hcl"
@@ -153,7 +358,6 @@ MFA method!
 But, we still need to enable the TOTP auth method...
 
 ```
-
 # Create TOTP Auth method and store its method_id
 TOTP_METHOD_ID=$(vault write identity/mfa/method/totp \
     -format=json \
@@ -162,7 +366,6 @@ TOTP_METHOD_ID=$(vault write identity/mfa/method/totp \
     key_size=30 \
     algorithm=SHA256 \
     digits=6 | jq -r '.data.method_id')
-
 ```
 
 Now, we can link the mfa authentication method to the userpass authenticator.
@@ -209,40 +412,3 @@ Open the png file in an image viewer, and scan it with your authenticator app,
 which will start generating TOTP codes.
 
 
-## traefik-forward-auth
-
-Now that Vault is configured as an authentication provider and an MFA-capable
-one at that, we can start configuring client apps to authenticate users with
-it. Not all web apps support OIDC authentication out of the box (e.g. Jupyter
-Notebooks, without a Jupyter Hub instance), but we can configure `traefik`
-middleware to only allow authenticated users to access any particular service.
-We will do this with the excellent
-[`traefik-forward-auth`](https://github.com/thomseddon/traefik-forward-auth)
-traefik plugin.
-
-The first step is to create an OIDC client in Vault. In the tutorial on the
-Vault website referred to above, it describes how to configure an OIDC client
-app in the [create a vault oidc client
-step](https://developer.hashicorp.com/vault/tutorials/auth-methods/oidc-identity-provider#create-a-vault-oidc-client).
-Please do that now, creating a client named `traefik-auth`.
-
-Once you've created the OIDC client app, get its `CLIENT_ID` and
-`CLIENT_SECRET` using:-
-
-`vault read identity/oidc/client/traefik-auth`
-
-The `CLIENT_ID` and `CLIENT_SECRET` then need to be added to the
-`traefik-forward-auth` service in
-[docker-compose-auth.yaml](../docker-compose-auth.yaml)
-
-Once this is configured, you can start protecting traefik services with it, by
-adding docker labels to each service you want to protect.
-
-```
-    labels:
-      [...]
-      - "traefik.http.routers.<router>.middlewares=traefik-forward-auth"
-```
-
-A fully protected example web service running the `whoami` image is
-demonstrated in [`docker-compose-whoami.yaml`](../docker-compose-whoami.yaml).

@@ -42,8 +42,8 @@ services:
       #- "./certs/default-cert.pem:/etc/ssl/default-cert.pem:ro"
 
     networks:
-      # The `default` network will be exposed to external hosts
-      - default
+      # The `public` network will be exposed to external hosts
+      - public
       # Service containers are routed through traefik to a private network
       - traefik_net
 
@@ -61,8 +61,8 @@ services:
       - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
       - "traefik.http.middlewares.dashboard-auth.basicauth.users=foo:$$apr1$$T.P1E9pC$$WTN3nfBdi/bwGHQgmxe5Z0"
 
-      # Protect the dashboard with the OWASP Core Rule Set (once configured)
-       - "traefik.http.routers.dashboard.middlewares=waf"
+      # Protect the dashboard with the OWASP Core Rule Set
+      - "traefik.http.routers.dashboard.middlewares=waf"
 
       # owasp-modsecurity plugin configuration
       - "traefik.http.middlewares.waf.plugin.modsecurity.modSecurityUrl=http://modsecurity-waf:80"

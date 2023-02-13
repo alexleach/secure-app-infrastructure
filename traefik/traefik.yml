@@ -41,8 +41,9 @@ certificatesResolvers:
       storage: "/etc/acme/step-ca.json"
 
       # Can use the service alias as hostname, as docker serves DNS requests
-      caServer: "https://ca.example.com/acme/acme/directory"
-      # I like EC384, personally...
+      caServer: "https://step-ca:9000/acme/acme/directory"
+      # I like EC384 personally, but CA's root keys aren't usually EC by
+      # default
       #keyType: EC384
 
       # Authenticate ACME response using the TLS challenge, for containers

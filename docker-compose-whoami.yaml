@@ -2,7 +2,7 @@ version: "3.3"
 name: example
 services:
   whoami:
-    image: "whoami"
+    image: "containous/whoami"
     labels:
       - "traefik.enable=true"
 
@@ -15,10 +15,10 @@ services:
 
       # Attach to TLS-enabled entrypoint, telling traefik to get a certificate
       # from the Step CA certificate resolver
-      - "traefik.http.routers.vault.entrypoints=websecure"
-      - "traefik.http.routers.vault.tls=true"
-      - "traefik.http.routers.vault.tls.certresolver=step-ca-resolver"
-      - "traefik.http.routers.vault.tls.domains[0].main=whoami.example.com"
+      - "traefik.http.routers.whoami.entryPoints=websecure"
+      - "traefik.http.routers.whoami.tls=true"
+      - "traefik.http.routers.whoami.tls.certresolver=step-ca-resolver"
+      - "traefik.http.routers.whoami.tls.domains[0].main=whoami.example.com"
 
       # The port the service is listening to
       - "traefik.http.services.whoami.loadbalancer.server.port=80"
