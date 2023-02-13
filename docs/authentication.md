@@ -138,8 +138,13 @@ Get the current, default policy, and append the above.
 DEFAULT_CONFIG="./vault/policies/default.hcl"
 APPEND_MFA_CONFIG="./vault/policies/generate-mfa.hcl"
 
+# Get the current 'default' policy
 vault policy read default > "${DEFAULT_CONFIG}"
+
+# Append the policies above to the default policy
 cat "${APPEND_MFA_CONFIG}" >> "${DEFAULT_CONFIG}"
+
+# Load the updated policy back into vault
 vault policy write default "${DEFAULT_CONFIG}"
 ```
 Now the default user permissions (should) allow entity's to register their own
@@ -164,7 +169,7 @@ Now, we can link the mfa authentication method to the userpass authenticator.
 We need the `TOTP_METHOD_ID` obtained above and the userpass accessor ID,
 obtained with:-
 
-`USERPASS_ACCESSOR_ID=vault auth list -format=json | jq -r '."userpass/".accessor'`
+`USERPASS_ACCESSOR_ID=$(vault auth list -format=json | jq -r '."userpass/".accessor'`)
 
 Enforce MFA on the userpass accessor:-
 
@@ -197,14 +202,14 @@ format:-
 
 ```
 QR_CODE="<copy and paste the 'barcode' value here>"
-echo "${QR_CODE}" | jq base64 --decode - > my-totp-qr-code.png
+echo "${QR_CODE}" | base64 --decode - > my-totp-qr-code.png
 ```
 
 Open the png file in an image viewer, and scan it with your authenticator app,
 which will start generating TOTP codes.
 
 
-## traefik and traefik-forward-auth
+## traefik-forward-auth
 
 Now that Vault is configured as an authentication provider and an MFA-capable
 one at that, we can start configuring client apps to authenticate users with

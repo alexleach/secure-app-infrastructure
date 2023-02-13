@@ -19,4 +19,4 @@ http:
       #peerCertURI: ca.example.com
 
       # For testing purposes (or single host).
-      insecureSkipVerify: true
+      # insecureSkipVerify: true

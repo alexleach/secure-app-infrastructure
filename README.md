@@ -11,7 +11,7 @@ private infrastructure! Or, if you prefer, run it all in the cloud!
 
 The high-level components are illustrated in the above figure. `traefik` routes
 all incoming requests based on their HTTP `Host` or TCP `HostSNI` headers. The
-configured `Host` names are used by traefik to request appropriately named SSL
+configured `Host` rules are used by traefik to request appropriately named SSL
 certificates from an ACME compliant issuing CA. Any requests not matching a
 configured `Host` name will just be presented with a `404` Response. HTTP
 requests are then filtered by the `modsecurity` Core Rule Set. If all is okay
@@ -31,14 +31,13 @@ I would suggest setting up the services in the following order:-
 
 1. [Step CA](https://smallstep.com/docs/step-ca). See the documentation at
    [certificates.md](docs/certificates.md)
-2. [`traefik` router](https://traefik.io/). Read through the comments and
-   configure [`docker-compose-router.yaml`](docker-compose-router.yaml) and
-   [`traefik.yaml`](traefik/traefik.yml) as per your requirements.
-3. [`Vault`](https://www.vaultproject.io/) Identity and OIDC Authentication
-   provider. See the docs, at [authentication.md](docs/authentication.md)
+2. [`traefik` router](https://traefik.io/).See my notes [here](docs/traefik.md)
+3. [`Vault`](https://www.vaultproject.io/), used as an Identity and OIDC
+   Authentication provider. (It can do a lot more!) See my setup docs, at
+   [authentication.md](docs/authentication.md)
 4. [`traefik-forward-auth`](https://github.com/thomseddon/traefik-forward-auth).
-   This is configured with Vault, as described
-   [here](https://github.com/thomseddon/traefik-forward-auth)
+   This is configured alongside the Vault service, as described
+   [here](docs/authentication.md#traefik-forward-auth)
 5. Add separate web services as necessary. An example `whoami` service is
    available in [`docker-compose-whoami.yaml`](docker-compose-whoami.yaml)
 

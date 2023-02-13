@@ -24,26 +24,28 @@ entryPoints:
   websecure:
     address: :443
 
-
 # API and dashboard configuration
 api:
   dashboard: true
 #  debug: true
 
 certificatesResolvers:
-# This example shows requesting certificates from a public CA server
-# using the acme letsencrypt resolver
+  # This example shows how to request certificates from a private ACME CA
+  # server, running Step CA.
 
   # Try and get certificate off my step-ca container...
   step-ca-resolver:
     acme:
       email: "me@example.com"
+      # Storage location for issued certificates
       storage: "/etc/acme/step-ca.json"
 
       # Can use the service alias as hostname, as docker serves DNS requests
       caServer: "https://ca.example.com/acme/acme/directory"
       # I like EC384, personally...
       #keyType: EC384
+
+      # Authenticate ACME response using the TLS challenge, for containers
       tlsChallenge: {}
       certificatesDuration: 24
 
