@@ -160,11 +160,11 @@ vault write identity/oidc/assignment/allowed_users \
     group_ids="${GROUP_ID}"
 ```
 
-Create a key to be used by the OIDC provider for your domain
+Create a key to be used by the OIDC provider.
 
 ```
 vault write identity/oidc/key/oidc-key \
-   allowed_client_ids="*.example.com" \
+   allowed_client_ids="*" \
    verification_ttl="2h" \
    rotation_period="1h" \
    algorithm="RS256"
