@@ -355,16 +355,17 @@ vault policy write default "${DEFAULT_CONFIG}"
 Now the default user permissions (should) allow entity's to register their own
 MFA method!
 
-But, we still need to enable the TOTP auth method...
+But, we still need to enable the TOTP auth method. (I found I'd get errors with
+Google's Authenticator app if I used `SHA256` algorithm here :confused:)
 
 ```
 # Create TOTP Auth method and store its method_id
 TOTP_METHOD_ID=$(vault write identity/mfa/method/totp \
     -format=json \
-    issuer=vault.example.com \
+    issuer=Vault \
     period=30 \
     key_size=30 \
-    algorithm=SHA256 \
+    algorithm=SHA1 \
     digits=6 | jq -r '.data.method_id')
 ```
 
@@ -372,7 +373,7 @@ Now, we can link the mfa authentication method to the userpass authenticator.
 We need the `TOTP_METHOD_ID` obtained above and the userpass accessor ID,
 obtained with:-
 
-`USERPASS_ACCESSOR_ID=$(vault auth list -format=json | jq -r '."userpass/".accessor'`)
+`USERPASS_ACCESSOR_ID=$(vault auth list -format=json | jq -r '."userpass/".accessor')`
 
 Enforce MFA on the userpass accessor:-
 
